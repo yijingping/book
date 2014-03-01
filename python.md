@@ -1,20 +1,20 @@
 # python进程与线程
 
 ## 什么时候使用多线程和多进程
+__Python多线程只有用在非计算密集型应用（如I/O密集的抓取程序）上才有意义__
 
-Python解释器使用了GIL（Global Interpreter Lock，全局解释器锁定），在任意时刻只允许单个Python线程执行。
+因为Python解释器使用了GIL（Global Interpreter Lock，全局解释器锁定），在任意时刻只允许单个Python线程执行。
 
 - 如果程序是费I/O的，可以使用多线程；
 - 如果程序是费CPU的，多线程反而会降低速度；（这种情况应该使用c模块扩展实现）
-- 使用多进程可以利用多个CPU
 
-所以万万记住，Python多线程只有用在非计算密集型应用（如I/O密集的抓取程序）上才有意义。
+__但Python多进程是可以利用多个CPU的__
 
-Python多进程是可以利用多个CPU的。所以上面的问题也可以用python多进程来解决。
-但更好的方法是：
+所以上面的问题也可以用python多进程来解决。
+但凡是多进程的程序都应优先考虑下面的解决方案：
 
 - 将要共享的数据放在redis或者数据库中，分布式执行程序，遇到性能问题，只要加机器就行了。
-- 或者使用分布式队列系统，如ZeroMQ、RabbitMQ、Beanstalk等。
+- 或者使用分布式队列系统，如ZeroMQ、RabbitMQ、Beanstalk、Thrift（这个不是队列）等， 开多个worker。
 
 ## 多进程（multiprocessing）
 
