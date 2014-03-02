@@ -338,6 +338,267 @@ set支持集合运算
 
 如果想把自定义类型放入集合，需要保证 hash 和 equal 的结果都相同才能去重。
 
+# 表达式
+## 类型转换
+
+    >>> str(123), int('123')                             # int 
+    >>> bin(17), int('0b10001', 2)
+    >>> oct(20), int('024', 8)
+    >>> hex(22), int('0x16', 16)
+    >>> str(0.9), float("0.9")                           # float
+    >>> ord('a'), chr(97), unichr(97)                    # char
+    >>> str([0, 1, 2]), eval("[0, 1, 2]")                # list
+    >>> str((0, 1, 2)), eval("(0, 1, 2)")                # tuple
+    >>> str({"a":1, "b":2}), eval("{'a': 1, 'b': 2}")    # dict
+    >>> str({1, 2, 3}), eval("{1, 2, 3}")                # set
+
+
+# 函数
+当编译器遇到 def，会生成创建函数对象指令。也就是说 def 是执行行指令，而而不仅仅是个语法关键字。可以在任何地方动态创建函数对象。
+一个完整的函数对象由函数和代码两部分组成。其中，PyCodeObject 包含了字节码等执行数据，而 PyFunctionObject 则为其提供了状态信息。
+
+函数声明:
+
+    def name([arg,... arg = value,... *arg, **kwarg]):
+        suite
+
+结构定义:
+
+    typedef struct {
+        PyObject_HEAD
+        PyObject *func_code;        // PyCodeObject
+        PyObject *func_globals;     // 所在模块的全局名字空间
+        PyObject *func_defaults;    // 参数默认值列表
+        PyObject *func_closure;     // 闭包列表
+        PyObject *func_doc;         // __doc__
+        PyObject *func_name;        // __name__
+        PyObject *func_dict;        // __dict__
+        PyObject *func_weakreflist; // 弱引用用链表
+        PyObject *func_module;      // 所在 Module
+    } PyFunctionObject;
+
+lambda 可以创建匿名函数
+
+## 参数
+\* 展开序列或者字典键值，\** 展开字典，所以可以使用序列和字典构造变参
+
+    >>> d = {'a': 1, 'b': 2}
+    >>> def f(*args, **kwargs):
+    ...     print args
+    ...     print kwargs
+    ...     
+
+    >>> f(d)
+    ({'a': 1, 'b': 2},)
+    {}
+
+    >>> f(*d)
+    ('a', 'b')
+    {}
+
+    >>> f(**d)
+    ()
+    {'a': 1, 'b': 2}
+
+
+__小心默认形参__
+
+默认值对象在创建函数时生成，所有调用都使用同一对象。如果该默认值是可变类型，那么就如同 C 静态局部变量。
+
+    >>> def test(x, ints = []):
+    ... ints.append(x)
+    ... return ints
+    >>> test(1)
+    [1]
+    >>> test(2)     # 保持了上次调用用状态。
+    [1, 2]
+    >>> test(1, []) # 显式提供实参，不使用默认值。
+    [1]
+    >>> test(3)     # 再次使用用默认值。
+    [1, 2, 3]
+
+## 作用域
+函数形参和内部变量都存储在 locals 名字空间中。
+
+    >>> def test(a, *args, **kwargs):
+    ... s = "Hello, World!"
+    ... print locals()
+    >>> test(1, "a", "b", x = 10, y = "hi")
+    {
+        'a': 1,
+        'args': ('a', 'b'),
+        'kwargs': {'y': 'hi', 'x': 10}
+        's': 'Hello, World!',
+    }
+
+除非使用 global、nonlocal 特别声明，否则在函数内部使用赋值语句，总是在 locals 名字空间中新建一个对象关联。注意:"赋值" 是指名字指向新的对象，而非通过名字改变对象状态。
+
+如果仅仅是引用用外部变量，那么按 LEGB 顺序在不同作用用域查找该名字。
+
+    名字查找顺序: locals -> enclosing function -> globals -> __builtins__
+
+* locals: 函数内部名字空间，包括局部变量和形参。
+* enclosing function: 外部嵌套函数的名字空间。
+* globals: 函数定义所在模块的名字空间。
+* \__builtins\__: 所有模块载入入时都持有该模块，其中包含了内置类型和函数。
+
+想想看，如果将对象引入` __builtins__` 名字空间，那么就可以在任何模块中直接访问，如同内置函数那样。不过鉴于 `__builtins__` 的特殊性，这似乎不是个好主意。
+
+    >>> __builtins__.b = "builtins"
+    >>> g = "globals"
+    >>> def enclose():
+    ...     e = "enclosing"
+    ...     def test():
+    ...         l = "locals"
+    ...         print l
+    ...         print e
+    ...         print g
+    ...         print b
+    ...    
+    ...     return test
+    >>> t = enclose()
+    >>> t()
+    locals
+    enclosing
+    globals
+    builtins
+
+现在，获取外部空间的名字没问题了，但如果想将外部名字关联到一个新对象，就需要使用用 global 关键字，指明要修改的是globals 名字空间。Python 3 还提供了 nonlocal 关键字，用来修改外部嵌套函数名字空间，可惜 2.7 没有。
+
+    >>> x = 100
+    >>> hex(id(x))
+    0x7f9a9264a028
+    >>> def test():
+    ...     global x, y         # 声明 x, y 是 globals 名字空间中的。
+    ...     x = 1000            # globals()["x"] = 1000
+    ...     y = "Hello, World!" # globals()["y"] = "..."。 新建名字。
+    ...     print hex(id(x)) 
+    >>> test()
+    0x7f9a9264a028              # 可以看到 test.x 引用用的是外部变量 x。
+    >>> x, y                    # globals 名字空间中出现了 y。
+    (1000, 'Hello, World!')
+ 
+## 闭包
+闭包是指:当函数离开创建环境后，依然持有其上下文文状态。注意闭包有"延迟获取"现象。
+
+## 堆栈帧
+Python 堆栈帧基本上就是对 x86 的模拟，用指针对应 BP、SP、IP 寄存器。堆栈帧成员包括函数执行所需的名字空间、调用堆栈链表、异常状态等。
+
+    typedef struct _frame {
+        PyObject_VAR_HEAD
+        struct _frame *f_back;   // 调用用堆栈 (Call Stack) 链表
+        PyCodeObject *f_code;    // PyCodeObject
+        PyObject *f_builtins;    // builtins 名字空间
+        PyObject *f_globals;     // globals 名字空间
+        PyObject *f_locals;      // locals 名字空间
+        PyObject **f_valuestack; // 和 f_stacktop 共同维护运行行帧空间，相当于 BP 寄存器。
+        PyObject **f_stacktop;   // 运行行栈顶，相当于 SP 寄存器的作用用。
+        PyObject *f_trace;       // Trace function
+        PyObject *f_exc_type, *f_exc_value, *f_exc_traceback; // 记录当前栈帧的异常信息
+        PyThreadState *f_tstate; // 所在线程状态
+        int f_lasti;             // 上一一条字节码指令在 f_code 中的偏移量，类似 IP 寄存器。
+        int f_lineno;           // 与当前字节码指令对应的源码行行号
+        ... ...
+        PyObject *f_localsplus[1]; ! // 动态申请的一一段内存，用用来模拟 x86 堆栈帧所在内存段。
+    } PyFrameObject;
+
+可使用用 `sys._getframe(0)` 或 `inspect.currentframe()` 获取当前堆栈帧。其中 _getframe() 深度参数为 0 表示示当前函数，1 表示示调用用堆栈的上个函数。除用于调试外，还可利用堆栈帧做些有意思的事情。
+
+`sys._current_frames` 返回所有线程的当前堆栈帧对象。虚拟机会缓存 200 个堆栈帧复用对象，以获得更好的执行性能。整个程序跑下来，天知道要创建多少个这类对象。
+
+## 包装
+用functools.partial() 可以将函数包装成更简洁的版本。
+
+## 常用函数
+__print__
+
+Python 2.7 可使用用 print 表达式，Python 3 就只能用用函数了。
+
+用标准库中的 pprint.pprint() 代替 print，能看到更漂亮的输出结果。
+
+__input__
+
+input 会将输入入的字符串进行行 eval 处理，raw_input 直接返回用用户输入入的原始字符串。
+
+Python 3 已经将 raw_input 重命名为 input。
+
+用标准库 getpass 输入入密码。
+
+__exit__
+
+exit([status]) 调用用所有退出函数后终止止进程，并返回 ExitCode。
+
+* 忽略或 status = None，表示示正常退出， ExitCode = 0。
+* status = <number>，表示示 ExiCode = <number>。
+* 返回非非数字对象表示示失败，参数会被显示示， ExitCode = 1。
+
+sys.exit() 和 exit() 完全相同。os_exit() 直接终止进程，不调用退出函数，且退出码必须是数字。
+
+__vars__
+
+获取 locals 或指定对象的名字空间。
+
+    >>> vars() is locals()
+    True
+    >>> import sys
+    >>> vars(sys) is sys.__dict__
+    True
+
+__dir__
+
+获取 locals 名字空间中的所有名字，或指定对象所有可访问成员 (包括基类)。
+
+    >>> set(locals().keys()) == set(dir())
+    True
+
+# 迭代器
+在 Python 文文档中，实现接口通常被称为遵守协议。因为 "弱类型" 和 "Duck Type" 的缘故，很多静态语言中繁复的模式被悄悄抹平。
+## iter
+迭代器对象要求支持迭代器协议，所谓支持迭代器协议就是对象包含__iter__()和next()方法。其中__iter__()方法返回迭代器对象自己；next()方法返回下一个前进到下一个结果，在结尾时引发StopIteration异常。
+
+列表不是迭代器对象，但是列表通过__iter__()可以得到一个迭代器对象来遍历整个列表的内容，像列表这样的序列对象都属于这种情况；与序列不同，文件对象本身就是一种迭代器对象。
+
+    class Reverse:
+        """Iterator for looping over a sequence backwards."""
+        def __init__(self, data):
+            self.data = data
+            self.index = len(data)
+        def __iter__(self):
+            return self
+        def next(self):
+            if self.index == 0:
+                raise StopIteration
+            self.index = self.index - 1
+            return self.data[self.index]
+
+
+## generator 
+生成器使python可以很容易的支持迭代协议。生成器通过生成器函数产生，生成器函数可以通过常规的def语句来定义，但是不用return返回，而是用yeild一次返回一个结果，在每个结果之间挂起和继续它们的状态，来自动实现迭代协议。
+
+    def reverse(data):
+        for index in range(len(data)-1, -1, -1):
+            yield data[index]
+
+__TIPS__:
+
+像列表这种序列类型的对象，我们可以通过iter()来产生多个迭代器，在迭代的过程中各个迭代器相互对立；但是迭代器对象没法通过iter()方法来产生多个不同的迭代器，它们都指向了自身，所以没法独立使用。
+
+## 协程
+当今一些具备协程语义的语言，比较重量级的如C#、erlang、golang，以及轻量级的python、lua、javascript、ruby，还有函数式的scala、scheme等。相比之下，作为原生态语言的 C 反而处于尴尬的地位，原因在于 C 依赖于一种叫做栈帧的例程调用，例程内部的状态量和返回值都保留在堆栈上，这意味着生产者和消费者相互之间无法实现平级调用。
+如果将每个协程的上下文（比如程序计数器）保存在其它地方而不是堆栈上，协程之间相互调用时，被调用的协程只要从堆栈以外的地方恢复上次出让点之前的上下文即可，这有点类似于 CPU 的上下文切换，遗憾的是似乎只有更底层的汇编语言才能做到这一点。
+
+
+## 标准库itertools
+ifilter/imap/izip等等
+
+# 模块
+
+
+
+
+
+
+
 # python进程与线程
 
 ## 什么时候使用多线程和多进程
