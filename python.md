@@ -247,7 +247,7 @@ Python 提供了3种字符串格式化方法。
 * string.Template 模板
 
 ### 池化
-在 Python 进程中，无数的对象拥有一堆类似 "__name__"、"__doc__" 这样的名字，池化有助于减少对象数量和内存消耗， 提升性能。
+在 Python 进程中，无数的对象拥有一堆类似 `__name__`、`__doc__` 这样的名字，池化有助于减少对象数量和内存消耗， 提升性能。
 
 用 intern() 函数可以把运行行期动态生生成的字符串池化。当池化的字符串不再有引用时，将被回收。
 
@@ -292,6 +292,7 @@ __namedtuple__
 
 ## 字典
 字典 (dict) 采用用开放地址法的哈希表实现。
+
 * 自带元素容量为 8 的 smalltable，只有 "超出" 时才到堆上额外分配元素表内存。
 * 虚拟机缓存 80 个字典复用用对象，但在堆上分配的元素表内存会被释放。
 * 按需动态调整容量。扩容或收缩操作都将重新分配内存，重新哈希。
@@ -592,7 +593,422 @@ __TIPS__:
 ifilter/imap/izip等等
 
 # 模块
+Python 模块是运行期对象，模块名对应源码文件。
+## 重要属性
 
+* `__name__`：模块名<package>.<module>，在sys.modules中以此为主键。
+* `__file__`：文件名，不带路径。
+* `__dict__`：模块globals名字空间。
+
+使用sys.reload()重新导入模块。
+
+## 搜索路径
+虚拟机按以下顺序搜索模块（包）：
+
+* 当前进程根目录。
+* PTTHONPATH环境变量指定的路径列表。
+* Python标准库目录列表。
+* 路径文件（.pth）保存的目录（通常放在site-packages目录下）。
+
+进程启动后，所有这些路径都被组织到sys.path列表中（顺序可能会被修改）。任何import操作都会按照sys.path列表查找目标模块。可以在运行时往sys.path添加自定义路径。
+
+虚拟机按以下顺序匹配目标模块：
+
+* py源码文件
+* pyc字节码文件
+* egg包文件或目录
+* so、dll、pyd等扩展文件。
+* 内置模块。
+* 其他。
+
+## 导入模块
+进程中的模块对象是唯一的。在首次导入后，被添加到sys.modules，后面导入的会检查是否已经存在，存在则不重复导入。可用sys.modules[__name__]获取当前模块对象。
+
+模块内使用import，导入到globals，函数内使用则导入到函数的locals。
+
+`__all__`
+为防止`import *`导入不必要的成员，使用`__all__`指定可导出的成员。
+
+    __all__ = ["add", "x"]
+
+私有成员和`__all__`都不会显示到出。但是Python还是可以调用到（约定大于配置）。
+
+`__import__`
+
+`imp.load_souce` 和 `reload()`
+
+## 构建包
+多个模块文件放到一个目录，并提供__init__.py，就形成了包。
+
+导入包/包中的模块/导入成员 都会执行`__init__.py`，且只执行一次。可用来初始化包环境，初始化包环境，存储帮助、版本等信息。
+
+### `__all__`：
+
+建议不要使用`import *`，换种方式，将要公开的模块和模块成员显示导入到`__init__.py`中，调用者使用：
+
+    import <package>
+    value = <package>.<member>
+
+### `__path__`：
+
+包内文件太多，需要分到多个目录中，但有不想拆分成新的包或者子包。只要在 `__init__.py` 中用 `__path__`指定所有子目录全路径即可。
+子目录中不需要`__init__.py`文件。
+    
+    from os.path import abspath, join
+    subdirs = lambda *dirs: [abspath(join(__path__[0], sub)) for sub in dirs]
+    __path__ = subdirs("a", "b")
+
+### `pkgutil`：
+
+使用pkgutil，而不是os.listdir()获取所有模块类表。
+
+iter_modules()遍历指定目录，walk_packages()遍历制定目录及其子目录。
+
+pkguitl.get_data()可读取包内任何文件内容
+
+### egg
+
+将包压缩成单个文件，以便于分发和安装。类似Java JAR。
+
+    ## 创建目录和setup.py文件
+
+    from setuptools import setup, find_packages
+    setup (
+            name = "test",
+            version = "0.0.9",
+            keywords = ("test", ),
+            description = "test package",
+            url = "http://github.com/qyuhen",
+            author = 'Q.yuhen',
+            author_email = "qyuhen@hotmail.com",
+            packages = find_packages(),
+          )
+
+    ## 创建egg压缩文件，test-0.0.9-py2.7.egg 文件保存在dist目录中
+    $ python setup.py bdist_egg
+
+    ## 将test-0.0.9-py2.7.egg全路径添加到.pth或PYTHONPATH环境变量就可使用。更常见的做法是将其安装到site_packages目录
+    $ sudo easy_install dist/test-0.0.9-py2.7.egg
+
+    ## 安装后的搜索路径被自动添加到site-packages/easy-install.pth中
+    $ cat site-packages/easy-install.pth
+    import sys; sys.__plen = len(sys.path)
+    ./setuptools-0.6c11-py2.7.egg
+    ./pip-1.2.1-py2.7.egg
+    ./beanstalkc-0.3.0-py2.7.egg 
+    ./PyYAML-3.10-py2.7-linux-x86_64.egg
+    ./redis-2.8.0-py2.7.egg
+    import sys; new=sys.path[sys.__plen:]; del sys.path[sys.__plen:]; p=getattr(sys,'__egginsert',0); sys.path[p:p]=new; sys.__egginsert = p+len(new)
+
+### pip 与 easy_install
+TODO
+### egg 与egg-info
+TODO
+
+# 类
+Python 2.x 存在两种类：Classic Class 和 New-Style Class。
+Python 3中仅保留了后一种，和type是一样的。所以即使在2.x中，也应显示的从object继承。
+
+    >>> class User: pass
+    >>> type(User)  # 2.x 
+    Classic Class
+
+    >>> class User(object): pass
+    >>> type(User)  # 2.x 
+    type 
+
+## 名字空间
+如同def，class关键字起着创建类型对象的作用。
+类型对象很特殊，在整个进程中是单例的，不被回收。
+
+    typedef struct
+    {
+        PyObject_HEAD
+        PyObject *cl_bases;    /* A tuple of class objects */
+        PyObject *cl_dict;    /* A dictionary */
+        PyObject *cl_name;    /* A string */
+        PyObject *cl_getattr;
+        PyObject *cl_setattr;
+        PyObject *cl_delattr;
+    } PyClassObject;
+
+类型（class）存储了所有的静态成员和方法，实例（instance）仅存储实例字段（所有父类的实例字段）
+
+    typedef struct
+    {
+        PyObject_HEAD
+        PyClassObject *in_class;    /* The class object */
+        PyObject  *in_dict;         /* A dictionary */
+        PyObject  *in_weakreflist;  /* List of weak references */
+    } PyInstanceObject;
+
+类型和实例各自拥有各自的名字空间。
+
+    >>> class S(object):
+    ...     a = 1
+    ...     def f():pass
+    >>> S.__dict__
+    <dictproxy {'__dict__': <attribute '__dict__' of 'S' objects>,
+    '__doc__': None,
+    '__module__': '__main__',
+    '__weakref__': <attribute '__weakref__' of 'S' objects>,
+    'a': 1,
+    'f': <function __main__.f>}>
+
+    >>> a = S()
+    >>> a.__dict__
+    {}
+
+访问对象成员不在locals和globals中查找，而是名字空间。查找顺序如下：
+
+    instance.__dict__ -> class.__dict__ -> baseclass.__dict__
+
+## 字段
+字段（field）和属性（property）是不同的。
+
+* instance的字段在`instance.__dict__`中
+* class的字段在`class.__dict__`中
+* 双下划线的方法和成员，视为私有，会被重命名：`_<class>__<name>`
+
+## 属性
+属性（property）是由getter、setter、deleter几个方法构成的逻辑。
+与field不同的是：
+
+* property可以返回动态运算值。
+* 在`__dict__`中显示的是`<property at 0xa83c5a4>}>`
+
+在查找成员的时候，（即使是父类的）属性比字段优先。 我们因该尽量使用属性，以免内部字段曝光。
+
+## 方法
+所有的方法都存储在`class.__dict__`中，所以不支持方法重载（Overload）。
+
+方法与函数最大的区别就是，方法有self这个参数。
+
+    >>> class User(object):
+    ...  def print_id(self):
+    ...     print hex(id(self))
+
+    >>> u = User()
+    >>> u.print_id
+    <bound method User.print_id of <__main__.User object at 0x10cf58b50>>
+
+    >>> u.print_id()
+    0x10cf58b50
+
+    >>> User.print_id
+    <unbound method User.print_id>
+
+    >>> User.print_id(u)
+    0x10cf58b50
+
+从上面可以看出实例方法的特殊性。当instance调用的时候，是bound method，动态绑定到调用的当前instance；当class调用的时候，是unbound method，必须显示的传递instance。
+
+### 静态方法
+staticmethod和classmethod
+
+    >>> class User(object):
+    ...  def a(): pass
+    ...
+    ... @staticmethod
+    ... def b(): pass
+    ...
+    ... @classmethod
+    ... def c(cls): pass
+
+    >>> User.a
+    <unbound method User.a>
+    >>> User.b
+    <function b at 0x10c8ef320>
+    >>> User.c
+    <bound method type.c of <class '__main__.User'>>
+
+    >>> User.a()
+    TypeError: unbound method a() must be called with User instance as first argument (got nothing instead)
+
+### 特殊方法
+
+* `__new__`：创建instance
+* `__init__`：初始化instance
+* `__del__`：instace回收前被调用
+
+`__new__`可以返回任意类型，一般返回self。
+
+### 继承（inherit）
+所有基类的实例字段都存储在`instance.__dict__`中，其他则各归各家。
+
+直接基类存储在`__bases__`中，直接派生类存储在`__subclasses__`中
+
+__多重继承__：
+
+多重继承的成员和方法搜索顺序：mro（method resolution order）。也就是：
+
+    从下到上，从左到右。
+
+mro中没有instance
+
+    >>> C.__mro__
+    (<class '__main__.C'>, <class '__main__.A'>, <class '__main__.B'>, <type 'object'>)
+
+__super()__：
+
+super() 依照mro顺序搜索基类成员。
+
+但多重继承的时候，super按照mro顺序查找的，因此会出问题，建议改用“组合模板”实现类似功能。
+
+不建议用`self.__class__`代替当前的类名，因为在继承的时候会引发混乱。
+
+## 抽象类（Abstract Class）
+
+抽象类无法实例化
+
+## 开放类（Open Class）
+Open Class几乎是所有动态语言的标配，也是精华所在。
+即使是运行期，也可以随意改动对象，增加或删除属性和方法。
+
+* 普通方法，应该绑定到class，而不是instance。否则只是普通方法，而不是bound method。
+* 静态方法，应该使用staticmethod、classmethod包装一下，否则只会成为上面的普通方法。
+* 使用setattr、getattr、delattr，直接操作instance和class的名字空间。
+
+`__slots__`：
+
+`__slots__`会阻止虚拟机创建`instance.__dict__`，仅为`__slots__`名单中的成员分配内存空间，运行期间也不以增加新的成员。
+这有助于减少内存占用，提高运行效率，尤其是大量使用该对象的时候。
+
+    >>> class User(object):
+    ...     __slots__ = ("_name", "_age")
+    ...
+    ...     def __init__(self, name, age):
+    ...         self._name = name
+    ...         self._age = age
+    >>> u = User("Tom", 34)
+    >>> hasattr(u, "__dict__")
+    False
+    >>> u.title = "CXO" # 动态增加字段失败
+    AttributeError: 'User' object has no attribute 'title'
+    >>> del u._age          # 已有的可以删除
+    >>> u._age = 18          # 坑是可以补回来的
+    >>> u._age
+    18
+    >>> del u._age
+    >>> u._title = "CXO"
+    AttributeError: 'User' object has no attribute '_title'
+    >>> vars(u)     # 因为没有__dict__，vars失败
+    TypeError: vars() argument must have __dict__ attribute
+
+虽然没有`__dict__`，但依然可以用dir()和inspect.getmember()获取实例成员信息。
+
+派生类必须用`__slots__`为新增的字段分配存储空间（即使`__slots__ = []`），否则会更慢。
+
+## 操作符重载
+### \__setitem__ 
+索引器，像序列和字典一样操作对象。
+
+    >>> class A(object):
+    ...     def __init__(self, **kwargs):
+    ...         self._data = kwargs
+    ...
+    ...     def __getitem__(self, key):
+    ...         return self._data.get(key)
+    ...
+    ...     def __setitem__(self, key, value):
+    ...         self._data[key] = value
+    ...
+    ...     def __delitem__(self, key):
+    ...         self._data.pop(key, None)
+    ...
+    ...     def __contains__(self, key):
+    ...         return key in self._data.keys()
+    >>> a = A(x = 1, y = 2)
+    >>> a["x"]
+    1
+    >>> a["z"] = 3
+    >>> "z" in a
+    True
+    >>> del a["y"]
+    >>> a._data
+    {'x': 1, 'z': 3}
+
+### \__call__ 
+把instance当function使，也就是传说中的callable。
+
+    >>> class A(object):
+    ...     def __call__(self, *args, **kwargs):
+    ...         print hex(id(self)), args, kwargs
+    >>> a = A()
+    >>> a(1, 2, s = "hi")    # 完全把instance，伪装成函数接口
+    0x10c8957d0 (1, 2) {'s': 'hi'}
+
+### \__dir__
+返回所有内部成员或方法（包括私有的）
+
+### \__getattr__ 
+先看看这几个方法的触发时机：
+
+* `__getattr__`：访问不存在的成员。
+* `__setattr__`：对任何成员的赋值操作。
+* `__delattr__`：删除成员操作。
+* `__getattribute__`：访问任何存在或不存在的成员，包括`__dict__`。
+
+不要在这几个方法里直接访问对象成员，也不要使用hasattr/getattr/setattr/delattr函数，因为它们会被再次拦截，形成无限循环。正确的做法是直接操作dict。
+
+    >>> class A(object):
+    ...   def __init__(self, x):
+    ...       self.x = x          # 会被__setattr__捕获
+    ...
+    ...   def __getattr__(self, name):
+    ...       print "get:", name
+    ...       return self.__dict__.get(name)
+    ...
+    ...  def __setattr__(self, name, value):
+    ...       print "set:", name, value
+    ...       self.__dict__[name] = value
+    ...
+    ...   def __delattr__(self, name):
+    ...       print "del:", name
+    ...       self.__dict__.pop(name, None)
+    ...
+    ...   def __getattribute__(self, name):
+    ...       print "attribute:", name
+    ...       return object.__getattribute__(self, name)
+
+    
+    >>> a = A(10)           # __init__ 里面的self.x = x 被 __setattr__ 捕获
+    set: x 10
+    attribute: __dict__
+    
+    >>> a.x                 # 访问已存在字段，仅被 __getattribute__ 捕获
+    attribute: x
+    10
+    
+    >>> a.y = 20            # 创建新的字段，被 __setattr__ 捕获
+    set: y 20
+    attribute: __dict__
+    
+    >>> a.z                 # 访问不存在字段，被 __getattr__ 和 __getattribute__ 捕获
+    attribute: z
+    get: z
+    attribute: __dict__
+    
+    >>> del a.y             # 删除字段，被 __delattr__ 捕获
+    del: y
+    attribute: __dict__
+
+### \__cmp__
+`__cmp__`通过返回数字来判断大小，而`__eq__`仅用于相等判断。
+
+### 其他
+
+`__repr__`、`unicode__`
+
+`__lt__`、`__le__`、`__gt__`、`__ge__`、`__ne__`
+
+`__add__`、`__radd__`、`__mul__`、`__imul__`
+
+`__getslice__`、`__setslice__`
+
+要了解更多的方法，最好去看Python源码。
+
+# 异常
 
 
 
