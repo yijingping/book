@@ -642,14 +642,14 @@ Python 模块是运行期对象，模块名对应源码文件。
 
 导入包/包中的模块/导入成员 都会执行`__init__.py`，且只执行一次。可用来初始化包环境，初始化包环境，存储帮助、版本等信息。
 
-### `__all__`：
+### \__all__
 
 建议不要使用`import *`，换种方式，将要公开的模块和模块成员显示导入到`__init__.py`中，调用者使用：
 
     import <package>
     value = <package>.<member>
 
-### `__path__`：
+### \__path__
 
 包内文件太多，需要分到多个目录中，但有不想拆分成新的包或者子包。只要在 `__init__.py` 中用 `__path__`指定所有子目录全路径即可。
 子目录中不需要`__init__.py`文件。
@@ -658,7 +658,7 @@ Python 模块是运行期对象，模块名对应源码文件。
     subdirs = lambda *dirs: [abspath(join(__path__[0], sub)) for sub in dirs]
     __path__ = subdirs("a", "b")
 
-### `pkgutil`：
+### pkgutil
 
 使用pkgutil，而不是os.listdir()获取所有模块类表。
 
